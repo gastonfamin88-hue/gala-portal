@@ -337,7 +337,10 @@ async function guardarVisita(publicar) {
 }
 function verInforme(v) {
   APP.visitaActiva = v;
-  if (!v.informe_html) v.informe_html = generarInformeVisita(v);
+  // Siempre se regenera con las respuestas más frescas, salvo que ya lo hayas editado a mano.
+  if (!v.informe_editado_manual) {
+    v.informe_html = generarInformeVisita(v);
+  }
   APP.vista = "admin_informe";
   render();
 }
@@ -581,7 +584,7 @@ function renderAdminChecklist(root) {
       <div style="margin-top:14px;">
         <button class="btn-primary" onclick="guardarVisita(false)">💾 Guardar borrador</button>
         <button class="btn-secondary" onclick="guardarVisita(true)">✔ Publicar para el cliente</button>
-        <button class="btn-secondary" onclick='verInforme(${JSON.stringify(v).replace(/'/g, "&apos;")})'>📄 Ver informe</button>
+        <button class="btn-secondary" onclick="verInforme(APP.visitaActiva)">📄 Ver informe</button>
       </div>
     </div>
 
