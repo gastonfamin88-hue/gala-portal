@@ -44,6 +44,14 @@ header .sub{font-size:12px;opacity:.85;}
 .invite-actions{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;}
 .btn-share{background:#fff;border:1px solid var(--borde);border-radius:6px;padding:6px 12px;font-size:12.5px;cursor:pointer;color:var(--texto);}
 .btn-share:hover{background:var(--azul-claro);border-color:var(--teal);}
+.informe-toolbar{display:flex;align-items:center;gap:6px;background:#fff;border:1px solid var(--borde);border-radius:8px;padding:8px 12px;margin-bottom:12px;flex-wrap:wrap;}
+.informe-toolbar .fmt-btn{background:#f4f6f7;border:1px solid var(--borde);border-radius:5px;width:30px;height:28px;cursor:pointer;font-size:13px;}
+.informe-toolbar .fmt-btn:hover{background:var(--azul-claro);}
+.informe-toolbar .fmt-label{font-size:12px;color:var(--muted);margin-right:2px;}
+.informe-toolbar .fmt-sep{width:1px;height:22px;background:var(--borde);margin:0 4px;}
+.informe-toolbar .swatch{width:22px;height:22px;border-radius:5px;border:1px solid rgba(0,0,0,.15);cursor:pointer;}
+.informe-toolbar .swatch:hover{outline:2px solid var(--teal);outline-offset:1px;}
+.informe-toolbar .swatch-none{background:#fff;font-size:11px;color:#B23A3A;}
 .grid-check{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
 .check-card{display:flex;gap:10px;align-items:flex-start;border:1.5px solid var(--borde);border-radius:8px;padding:12px;cursor:pointer;font-size:14px;}
 .check-card.checked{border-color:var(--teal);background:var(--azul-claro);}
@@ -283,6 +291,14 @@ async function eliminarVisita(id) {
   if (error) { alert("Error al eliminar: " + error.message); return; }
   await abrirCentro(APP.centroActivo);
 }
+async function eliminarCentro(id, nombre) {
+  if (!confirm(`¿Seguro que querés eliminar "${nombre}"? Se borran también todas sus visitas. No se puede deshacer.`)) return;
+  const { error } = await supabase.rpc("eliminar_centro", { p_centro_id: id });
+  if (error) { alert("Error al eliminar el centro: " + error.message); return; }
+  await cargarCentros();
+  APP.vista = "admin_centros";
+  render();
+}
 async function abrirCentro(centro) {
   APP.centroActivo = centro;
   const { data, error } = await supabase.from("visitas").select("*").eq("centro_id", centro.id).order("fecha", { ascending: false });
@@ -302,6 +318,12 @@ async function crearVisita(gKey, tipo) {
 }
 async function guardarVisita(publicar) {
   const v = APP.visitaActiva;
+  // Si el informe todavía no fue editado a mano, lo regeneramos con los datos frescos
+  // (así las observaciones nuevas de la grilla quedan reflejadas). Si ya se editó
+  // manualmente, no lo tocamos para no pisar lo que se escribió.
+  if (!v.informe_editado_manual) {
+    v.informe_html = generarInformeVisita(v);
+  }
   const payload = {
     respuestas: v.respuestas, datos_generales: v.datos_generales,
     auditores: v.auditores, fecha: v.fecha, informe_html: v.informe_html || null,
@@ -494,7 +516,10 @@ function renderAdminCentroDetalle(root) {
         ` : `
           <div class="area-head">
             <h2>${esc(c.nombre)}</h2>
-            <button class="btn-secondary" style="margin:0;" onclick="APP.editandoCentro=true; render();">✏️ Editar centro</button>
+            <div style="display:flex;gap:8px;">
+              <button class="btn-secondary" style="margin:0;" onclick="APP.editandoCentro=true; render();">✏️ Editar centro</button>
+              <button class="btn-remove-auditor" style="width:auto;padding:0 12px;" title="Eliminar centro" onclick="eliminarCentro('${c.id}', ${JSON.stringify(c.nombre)})">🗑 Eliminar centro</button>
+            </div>
           </div>
           <p class="muted">${[c.direccion, c.telefono, c.email].filter(Boolean).map(esc).join(" · ") || "Sin datos de contacto cargados"}</p>
           <div style="margin-top:6px;"><span class="chip chip-info">Código de invitación para el cliente: ${esc(c.invite_code)}</span></div>
@@ -610,8 +635,13 @@ function renderAdminChecklist(root) {
     });
     html += `</div>`;
   });
-  html += `</main>`;
+  html += `</main>
+    <button class="no-print" id="btn-scroll-top" title="Subir arriba para guardar"
+      style="position:fixed;bottom:24px;right:24px;width:52px;height:52px;border-radius:50%;
+      background:var(--teal);color:#fff;border:none;font-size:22px;cursor:pointer;
+      box-shadow:0 3px 10px rgba(0,0,0,.25);z-index:50;">⬆</button>`;
   root.innerHTML = html;
+  document.getElementById("btn-scroll-top").addEventListener("click", () => window.scrollTo({ top: 0, behavior: "smooth" }));
 
   document.getElementById("dg-fecha").addEventListener("input", e => { v.fecha = e.target.value; });
   document.getElementById("dg-tipo").addEventListener("change", e => { v.tipo = e.target.value; });
@@ -654,14 +684,47 @@ function renderInformeView(root, esAdmin) {
   root.innerHTML = topbar("Informe de auditoría") + `<main id="main">
     <div class="card no-print">
       <button class="btn-secondary" onclick="${esAdmin ? "APP.vista='admin_checklist'; render();" : "APP.vista='cliente_dashboard'; render();"}">← Volver</button>
-      ${esAdmin ? `<button class="btn-secondary" onclick="if(confirm('Esto reemplaza el texto actual del informe por un borrador nuevo. ¿Continuar?')){APP.visitaActiva.informe_html=generarInformeVisita(APP.visitaActiva); render();}">↻ Regenerar borrador</button>` : ""}
+      ${esAdmin ? `<button class="btn-secondary" onclick="if(confirm('Esto reemplaza el texto actual del informe por un borrador nuevo. ¿Continuar?')){APP.visitaActiva.informe_html=generarInformeVisita(APP.visitaActiva); APP.visitaActiva.informe_editado_manual=false; render();}">↻ Regenerar borrador</button>` : ""}
       <button class="btn-primary" onclick="window.print()">🖨️ Imprimir / Descargar PDF</button>
       ${esAdmin ? `<button class="btn-primary" onclick="guardarInforme()">💾 Guardar informe</button>` : ""}
     </div>
+    ${esAdmin ? `
+    <div class="informe-toolbar no-print">
+      <button type="button" class="fmt-btn" data-cmd="bold" title="Negrita"><b>B</b></button>
+      <button type="button" class="fmt-btn" data-cmd="italic" title="Cursiva"><i>I</i></button>
+      <button type="button" class="fmt-btn" data-cmd="underline" title="Subrayado"><u>S</u></button>
+      <span class="fmt-sep"></span>
+      <span class="fmt-label">Color:</span>
+      <button type="button" class="swatch" data-cmd="foreColor" data-val="#1B2430" style="background:#1B2430" title="Negro"></button>
+      <button type="button" class="swatch" data-cmd="foreColor" data-val="#B23A3A" style="background:#B23A3A" title="Rojo"></button>
+      <button type="button" class="swatch" data-cmd="foreColor" data-val="#065A82" style="background:#065A82" title="Azul"></button>
+      <button type="button" class="swatch" data-cmd="foreColor" data-val="#3F7D5C" style="background:#3F7D5C" title="Verde"></button>
+      <span class="fmt-sep"></span>
+      <span class="fmt-label">Resaltar:</span>
+      <button type="button" class="swatch" data-cmd="hiliteColor" data-val="#FFF59D" style="background:#FFF59D" title="Amarillo"></button>
+      <button type="button" class="swatch" data-cmd="hiliteColor" data-val="#A8E6A1" style="background:#A8E6A1" title="Verde claro"></button>
+      <button type="button" class="swatch" data-cmd="hiliteColor" data-val="#FFB4A2" style="background:#FFB4A2" title="Salmón"></button>
+      <button type="button" class="swatch swatch-none" data-cmd="hiliteColor" data-val="transparent" title="Quitar resaltado">✕</button>
+      <span class="fmt-sep"></span>
+      <button type="button" class="fmt-btn" data-cmd="removeFormat" title="Limpiar formato">Limpiar</button>
+    </div>` : ""}
     <div class="card informe-doc" id="informe-doc" ${esAdmin ? 'contenteditable="true"' : ""}>${v.informe_html}</div>
   </main>`;
   if (esAdmin) {
-    document.getElementById("informe-doc").addEventListener("input", e => { v.informe_html = e.target.innerHTML; });
+    document.getElementById("informe-doc").addEventListener("input", e => {
+      v.informe_html = e.target.innerHTML;
+      v.informe_editado_manual = true;
+    });
+    root.querySelectorAll(".informe-toolbar button").forEach(btn => {
+      btn.addEventListener("mousedown", e => e.preventDefault()); // no perder la selección de texto
+      btn.addEventListener("click", () => {
+        const doc = document.getElementById("informe-doc");
+        doc.focus();
+        document.execCommand(btn.dataset.cmd, false, btn.dataset.val || null);
+        v.informe_html = doc.innerHTML;
+        v.informe_editado_manual = true;
+      });
+    });
   }
 }
 
@@ -722,6 +785,7 @@ window.logout = logout;
 window.crearCentro = crearCentro;
 window.actualizarCentro = actualizarCentro;
 window.eliminarVisita = eliminarVisita;
+window.eliminarCentro = eliminarCentro;
 window.compartirWhatsapp = compartirWhatsapp;
 window.compartirMail = compartirMail;
 window.abrirCentro = abrirCentro;
